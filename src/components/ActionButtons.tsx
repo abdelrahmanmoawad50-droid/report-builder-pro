@@ -8,16 +8,17 @@ import {
   FileDown, 
   Trash2, 
   Eye,
-  Settings
+  Settings,
+  Plus
 } from 'lucide-react';
-import { generateLatex } from '@/lib/latex-generator';
+import { generateLatex, generateMultipleLatex } from '@/lib/latex-generator';
 import { 
   buildCVSSVector, 
   calculateCVSS4Score, 
   getFirstOrgLink, 
   getSeverity 
 } from '@/lib/cvss4';
-import type { FindingFormData, FindingData, EvidenceFile } from '@/types/finding';
+import type { FindingFormData, FindingData, EvidenceFile, StoredFinding } from '@/types/finding';
 import type { CVSSMetrics } from '@/lib/cvss4';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -42,11 +43,13 @@ interface ActionButtonsProps {
     cvssMetrics: CVSSMetrics;
     evidence: EvidenceFile | null;
   };
+  findings: StoredFinding[];
   onClear: () => void;
   onImport: (data: FindingFormData) => void;
+  onAddFinding: () => void;
 }
 
-export function ActionButtons({ formData, onClear, onImport }: ActionButtonsProps) {
+export function ActionButtons({ formData, findings, onClear, onImport, onAddFinding }: ActionButtonsProps) {
   const { toast } = useToast();
   const [previewContent, setPreviewContent] = useState<string>('');
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -101,71 +104,139 @@ export function ActionButtons({ formData, onClear, onImport }: ActionButtonsProp
     };
   };
 
-  const handlePreview = () => {
+  const handleAddFinding = () => {
     if (!validateForm()) return;
-    const findingData = buildFindingData();
-    const latex = generateLatex(findingData);
-    setPreviewContent(latex);
+    onAddFinding();
+    toast({
+      title: 'Finding Added',
+      description: `"${formData.findingName}" added to the list`,
+    });
+  };
+
+  const handlePreview = () => {
+    if (findings.length === 0) {
+      // Preview single current finding
+      if (!validateForm()) return;
+      const findingData = buildFindingData();
+      const latex = generateLatex(findingData);
+      setPreviewContent(latex);
+    } else {
+      // Preview all findings
+      const allFindings = findings.map(f => f.data);
+      const latex = generateMultipleLatex(allFindings);
+      setPreviewContent(latex);
+    }
     setPreviewOpen(true);
   };
 
   const handleGenerateZip = async () => {
-    if (!validateForm()) return;
+    if (findings.length === 0) {
+      // Single finding mode
+      if (!validateForm()) return;
 
-    const findingData = buildFindingData();
-    const latex = generateLatex(findingData);
-    const severity = findingData.severity;
+      const findingData = buildFindingData();
+      const latex = generateLatex(findingData);
+      const severity = findingData.severity;
 
-    const zip = new JSZip();
-    
-    // Add LaTeX file
-    zip.file('output/finding.tex', latex);
-    
-    // Add evidence image if exists
-    if (formData.evidence) {
-      const imageFolder = `output/images/findings/${severity}/`;
+      const zip = new JSZip();
+      zip.file('output/finding.tex', latex);
       
-      // Convert base64 to blob
-      const base64Data = formData.evidence.preview.split(',')[1];
-      const binaryString = atob(base64Data);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
+      if (formData.evidence) {
+        const imageFolder = `output/images/findings/${severity}/`;
+        const base64Data = formData.evidence.preview.split(',')[1];
+        const binaryString = atob(base64Data);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        zip.file(imageFolder + formData.evidence.filename, bytes);
       }
+
+      const content = await zip.generateAsync({ type: 'blob' });
+      const filename = `finding_${formData.findingName.replace(/[^a-zA-Z0-9]/g, '_')}.zip`;
+      saveAs(content, filename);
+
+      toast({
+        title: 'ZIP Generated',
+        description: `Downloaded ${filename}`,
+      });
+    } else {
+      // Multiple findings mode
+      const allFindings = findings.map(f => f.data);
+      const latex = generateMultipleLatex(allFindings);
+
+      const zip = new JSZip();
+      zip.file('output/findings.tex', latex);
       
-      zip.file(imageFolder + formData.evidence.filename, bytes);
+      // Add all evidence images
+      for (const finding of findings) {
+        if (finding.evidencePreview && finding.data.evidenceFilename) {
+          const imageFolder = `output/images/findings/${finding.data.severity}/`;
+          const base64Data = finding.evidencePreview.split(',')[1];
+          const binaryString = atob(base64Data);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          zip.file(imageFolder + finding.data.evidenceFilename, bytes);
+        }
+      }
+
+      const content = await zip.generateAsync({ type: 'blob' });
+      const filename = `findings_report_${findings.length}_items.zip`;
+      saveAs(content, filename);
+
+      toast({
+        title: 'ZIP Generated',
+        description: `Downloaded ${filename} with ${findings.length} findings`,
+      });
     }
-
-    const content = await zip.generateAsync({ type: 'blob' });
-    const filename = `finding_${formData.findingName.replace(/[^a-zA-Z0-9]/g, '_')}.zip`;
-    saveAs(content, filename);
-
-    toast({
-      title: 'ZIP Generated',
-      description: `Downloaded ${filename}`,
-    });
   };
 
   const handleExportJson = () => {
-    const exportData = {
-      findingName: formData.findingName,
-      testCase: formData.testCase,
-      urlSystemIp: formData.urlSystemIp,
-      description: formData.description,
-      exploitationDetails: formData.exploitationDetails,
-      remediation: formData.remediation,
-      references: formData.references,
-      cvssMetrics: formData.cvssMetrics,
-    };
+    if (findings.length === 0) {
+      // Export single finding
+      const exportData = {
+        findingName: formData.findingName,
+        testCase: formData.testCase,
+        urlSystemIp: formData.urlSystemIp,
+        description: formData.description,
+        exploitationDetails: formData.exploitationDetails,
+        remediation: formData.remediation,
+        references: formData.references,
+        cvssMetrics: formData.cvssMetrics,
+      };
 
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-    const filename = `finding_${formData.findingName.replace(/[^a-zA-Z0-9]/g, '_') || 'export'}.json`;
-    saveAs(blob, filename);
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const filename = `finding_${formData.findingName.replace(/[^a-zA-Z0-9]/g, '_') || 'export'}.json`;
+      saveAs(blob, filename);
 
-    toast({
-      title: 'JSON Exported',
-      description: `Downloaded ${filename}`,
-    });
+      toast({
+        title: 'JSON Exported',
+        description: `Downloaded ${filename}`,
+      });
+    } else {
+      // Export all findings
+      const exportData = findings.map(f => ({
+        findingName: f.data.findingName,
+        testCase: f.data.testCase,
+        urlSystemIp: f.data.urlSystemIp,
+        description: f.data.description,
+        exploitationDetails: f.data.exploitationDetails,
+        remediation: f.data.remediation,
+        references: f.data.references,
+        cvssMetrics: f.data.cvssMetrics,
+      }));
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const filename = `findings_${findings.length}_items.json`;
+      saveAs(blob, filename);
+
+      toast({
+        title: 'JSON Exported',
+        description: `Downloaded ${filename} with ${findings.length} findings`,
+      });
+    }
   };
 
   const handleImportJson = () => {
@@ -180,21 +251,45 @@ export function ActionButtons({ formData, onClear, onImport }: ActionButtonsProp
       reader.onload = (event) => {
         try {
           const data = JSON.parse(event.target?.result as string);
-          onImport({
-            findingName: data.findingName || '',
-            testCase: data.testCase || 'WSTG-INPV-02',
-            urlSystemIp: data.urlSystemIp || '',
-            description: data.description || '',
-            exploitationDetails: data.exploitationDetails || '',
-            remediation: data.remediation || '',
-            references: data.references || [],
-            cvssMetrics: data.cvssMetrics || {},
-            evidence: null,
-          });
-          toast({
-            title: 'JSON Imported',
-            description: 'Finding data loaded successfully',
-          });
+          
+          // Check if it's an array (multiple findings) or single finding
+          if (Array.isArray(data)) {
+            // Import first finding for now (could extend to import all)
+            const firstFinding = data[0];
+            if (firstFinding) {
+              onImport({
+                findingName: firstFinding.findingName || '',
+                testCase: firstFinding.testCase || 'WSTG-INPV-02',
+                urlSystemIp: firstFinding.urlSystemIp || '',
+                description: firstFinding.description || '',
+                exploitationDetails: firstFinding.exploitationDetails || '',
+                remediation: firstFinding.remediation || '',
+                references: firstFinding.references || [],
+                cvssMetrics: firstFinding.cvssMetrics || {},
+                evidence: null,
+              });
+              toast({
+                title: 'JSON Imported',
+                description: `Loaded first finding from ${data.length} total`,
+              });
+            }
+          } else {
+            onImport({
+              findingName: data.findingName || '',
+              testCase: data.testCase || 'WSTG-INPV-02',
+              urlSystemIp: data.urlSystemIp || '',
+              description: data.description || '',
+              exploitationDetails: data.exploitationDetails || '',
+              remediation: data.remediation || '',
+              references: data.references || [],
+              cvssMetrics: data.cvssMetrics || {},
+              evidence: null,
+            });
+            toast({
+              title: 'JSON Imported',
+              description: 'Finding data loaded successfully',
+            });
+          }
         } catch {
           toast({
             title: 'Import Failed',
@@ -217,7 +312,12 @@ export function ActionButtons({ formData, onClear, onImport }: ActionButtonsProp
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <Button onClick={handleAddFinding} variant="secondary" className="w-full">
+            <Plus className="h-4 w-4 mr-2" />
+            Add Finding
+          </Button>
+
           <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" onClick={handlePreview} className="w-full">
@@ -227,7 +327,9 @@ export function ActionButtons({ formData, onClear, onImport }: ActionButtonsProp
             </DialogTrigger>
             <DialogContent className="max-w-4xl max-h-[80vh]">
               <DialogHeader>
-                <DialogTitle>LaTeX Preview</DialogTitle>
+                <DialogTitle>
+                  LaTeX Preview {findings.length > 0 ? `(${findings.length} findings)` : ''}
+                </DialogTitle>
               </DialogHeader>
               <ScrollArea className="h-[60vh]">
                 <pre className="text-xs font-mono bg-muted p-4 rounded-lg whitespace-pre-wrap">
@@ -239,7 +341,7 @@ export function ActionButtons({ formData, onClear, onImport }: ActionButtonsProp
 
           <Button onClick={handleGenerateZip} className="w-full">
             <Download className="h-4 w-4 mr-2" />
-            Generate ZIP
+            {findings.length > 0 ? `ZIP (${findings.length})` : 'Generate ZIP'}
           </Button>
 
           <Button variant="outline" onClick={handleExportJson} className="w-full">
@@ -254,7 +356,7 @@ export function ActionButtons({ formData, onClear, onImport }: ActionButtonsProp
 
           <Button variant="destructive" onClick={onClear} className="w-full">
             <Trash2 className="h-4 w-4 mr-2" />
-            Clear Form
+            Clear All
           </Button>
         </div>
       </CardContent>

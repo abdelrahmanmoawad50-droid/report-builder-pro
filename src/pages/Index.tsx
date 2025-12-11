@@ -3,8 +3,9 @@ import { CVSSCalculator } from '@/components/CVSSCalculator';
 import { FindingForm } from '@/components/FindingForm';
 import { EvidenceUpload } from '@/components/EvidenceUpload';
 import { ActionButtons } from '@/components/ActionButtons';
-import { DEFAULT_METRICS, type CVSSMetrics } from '@/lib/cvss4';
-import type { EvidenceFile, FindingFormData } from '@/types/finding';
+import { FindingsList } from '@/components/FindingsList';
+import { DEFAULT_METRICS, type CVSSMetrics, buildCVSSVector, calculateCVSS4Score, getFirstOrgLink, getSeverity } from '@/lib/cvss4';
+import type { EvidenceFile, FindingFormData, StoredFinding, FindingData } from '@/types/finding';
 import { Shield } from 'lucide-react';
 
 const Index = () => {
@@ -17,8 +18,11 @@ const Index = () => {
   const [references, setReferences] = useState<string[]>([]);
   const [cvssMetrics, setCvssMetrics] = useState<CVSSMetrics>(DEFAULT_METRICS);
   const [evidence, setEvidence] = useState<EvidenceFile | null>(null);
+  
+  // Multi-finding state
+  const [findings, setFindings] = useState<StoredFinding[]>([]);
 
-  const handleClear = useCallback(() => {
+  const clearForm = useCallback(() => {
     setFindingName('');
     setTestCase('WSTG-INPV-02');
     setUrlSystemIp('');
@@ -29,6 +33,11 @@ const Index = () => {
     setCvssMetrics(DEFAULT_METRICS);
     setEvidence(null);
   }, []);
+
+  const handleClear = useCallback(() => {
+    clearForm();
+    setFindings([]);
+  }, [clearForm]);
 
   const handleImport = useCallback((data: FindingFormData) => {
     setFindingName(data.findingName);
@@ -41,6 +50,41 @@ const Index = () => {
     if (data.cvssMetrics) {
       setCvssMetrics({ ...DEFAULT_METRICS, ...data.cvssMetrics });
     }
+  }, []);
+
+  const handleAddFinding = useCallback(() => {
+    const vector = buildCVSSVector(cvssMetrics);
+    const score = calculateCVSS4Score(cvssMetrics);
+    const severity = getSeverity(score);
+
+    const findingData: FindingData = {
+      findingName,
+      testCase,
+      urlSystemIp,
+      description,
+      exploitationDetails,
+      remediation,
+      references,
+      cvssMetrics,
+      cvssVector: vector,
+      cvssScore: score,
+      severity,
+      firstOrgLink: getFirstOrgLink(vector),
+      evidenceFilename: evidence?.filename,
+    };
+
+    const storedFinding: StoredFinding = {
+      id: crypto.randomUUID(),
+      data: findingData,
+      evidencePreview: evidence?.preview,
+    };
+
+    setFindings(prev => [...prev, storedFinding]);
+    clearForm();
+  }, [findingName, testCase, urlSystemIp, description, exploitationDetails, remediation, references, cvssMetrics, evidence, clearForm]);
+
+  const handleRemoveFinding = useCallback((id: string) => {
+    setFindings(prev => prev.filter(f => f.id !== id));
   }, []);
 
   const formData = {
@@ -81,8 +125,16 @@ const Index = () => {
         {/* Actions at top for quick access */}
         <ActionButtons 
           formData={formData}
+          findings={findings}
           onClear={handleClear}
           onImport={handleImport}
+          onAddFinding={handleAddFinding}
+        />
+
+        {/* Findings List */}
+        <FindingsList 
+          findings={findings}
+          onRemove={handleRemoveFinding}
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

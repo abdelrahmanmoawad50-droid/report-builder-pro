@@ -79,3 +79,8 @@ ${referencesItems}
 
   return latex;
 }
+
+// Generate LaTeX document with multiple findings
+export function generateMultipleLatex(findings: FindingData[]): string {
+  return findings.map(finding => generateLatex(finding)).join('\n');
+}
