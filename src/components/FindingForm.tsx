@@ -49,7 +49,7 @@ export function FindingForm({
 }: FindingFormProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>('');
 
-  const filteredTestCases = selectedCategory
+  const filteredTestCases = selectedCategory && selectedCategory !== '_all'
     ? WSTG_TEST_CASES.filter(tc => tc.category === selectedCategory)
     : WSTG_TEST_CASES;
 
@@ -97,7 +97,7 @@ export function FindingForm({
                 <SelectValue placeholder="All Categories" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Categories</SelectItem>
+                <SelectItem value="_all">All Categories</SelectItem>
                 {WSTG_CATEGORIES.map((cat) => (
                   <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                 ))}
