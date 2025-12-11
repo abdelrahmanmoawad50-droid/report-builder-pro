@@ -33,3 +33,10 @@ export interface FindingFormData {
   cvssMetrics: CVSSMetrics;
   evidence: EvidenceFile | null;
 }
+
+// Stored finding with all computed data and evidence
+export interface StoredFinding {
+  id: string;
+  data: FindingData;
+  evidencePreview?: string; // base64 preview for ZIP generation
+}
